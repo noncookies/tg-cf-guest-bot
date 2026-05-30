@@ -283,6 +283,18 @@ async function handleCallback(query, env) {
       await editMcpToolDetail(env, chatId, messageId, id, Number(index));
       return;
     }
+
+    if (data.startsWith("mcp_edit:")) {
+      const [, id, field] = data.split(":");
+      await startMcpEditField(env, userId, chatId, messageId, id, field);
+      return;
+    }
+
+    if (data.startsWith("mcp_edittype:")) {
+      const [, id, type] = data.split(":");
+      await applyMcpEditType(env, userId, chatId, messageId, id, type);
+      return;
+    }
   } catch (error) {
     console.error("callback failed", error);
     await answerCallbackQuery(env, query.id, "操作失败，请查看 Worker 日志");
@@ -389,6 +401,11 @@ async function startMcpAddFlow(env, userId, chatId, messageId) {
 }
 
 async function continueMcpSession(env, userId, chatId, value, session) {
+  if (session.step?.startsWith("mcp_edit_")) {
+    await continueMcpEditSession(env, userId, chatId, value, session);
+    return;
+  }
+
   const pendingData = { ...(session.pendingData || {}) };
 
   if (session.step === "mcp_name") {
@@ -432,6 +449,83 @@ async function continueMcpSession(env, userId, chatId, value, session) {
   if (session.step === "mcp_headers") {
     await finishMcpFromSession(env, userId, chatId, null, parseHeaderLines(value));
   }
+}
+
+async function startMcpEditField(env, userId, chatId, messageId, id, field) {
+  const service = await getMcpService(env, id);
+  if (!service) {
+    await editMessageText(env, chatId, messageId, "MCP 服务不存在。");
+    return;
+  }
+
+  if (field === "type") {
+    await editMessageText(env, chatId, messageId, `当前类型：${service.type}\n请选择新的 MCP 服务类型：`, {
+      inline_keyboard: [
+        [
+          { text: `${service.type === "HTTP" ? "● " : "○ "}HTTP`, callback_data: `mcp_edittype:${id}:HTTP` },
+          { text: `${service.type === "SSE" ? "● " : "○ "}SSE`, callback_data: `mcp_edittype:${id}:SSE` },
+        ],
+        [{ text: "⬅️ 返回", callback_data: `mcp_select:${id}` }],
+      ],
+    });
+    return;
+  }
+
+  const prompts = {
+    name: "请发送新的服务名称。",
+    url: "请发送新的 MCP 服务地址 URL。",
+    description: "请发送新的服务描述。",
+    keywords: "请发送新的关键词，多个关键词用逗号分隔。",
+    headers: [
+      "请发送自定义请求头，每行一个：",
+      "",
+      "Authorization=Bearer xxx",
+      "X-Api-Key=xxx",
+      "",
+      "发送「清空」可删除所有请求头。",
+    ].join("\n"),
+  };
+
+  await setSession(env, userId, { step: `mcp_edit_${field}`, targetId: id });
+  await editMessageText(env, chatId, messageId, prompts[field] || `请发送新的 ${field}。`);
+}
+
+async function applyMcpEditType(env, userId, chatId, messageId, id, type) {
+  const service = await getMcpService(env, id);
+  if (!service) return;
+  service.type = type === "SSE" ? "SSE" : "HTTP";
+  await putMcpService(env, service);
+  await editMcpDetail(env, chatId, messageId, id);
+}
+
+async function continueMcpEditSession(env, userId, chatId, value, session) {
+  const id = session.targetId;
+  const service = await getMcpService(env, id);
+  if (!service) {
+    await clearSession(env, userId);
+    await sendMessage(env, chatId, "MCP 服务不存在，已结束编辑。");
+    return;
+  }
+
+  const field = session.step.replace("mcp_edit_", "");
+  const fieldLabels = {
+    name: "服务名称",
+    url: "服务地址",
+    description: "服务描述",
+    keywords: "关键词",
+    headers: "自定义请求头",
+  };
+
+  if (field === "name") service.name = value;
+  else if (field === "url") service.url = value;
+  else if (field === "description") service.description = value;
+  else if (field === "keywords") service.keywords = splitKeywords(value);
+  else if (field === "headers") service.headers = value.trim() === "清空" ? {} : parseHeaderLines(value);
+
+  await putMcpService(env, service);
+  await clearSession(env, userId);
+  await sendMessage(env, chatId, `已更新「${fieldLabels[field] || field}」。`);
+  await showMcpDetail(env, chatId, id);
 }
 
 async function setMcpType(env, userId, chatId, messageId, type) {
@@ -523,8 +617,18 @@ async function buildMcpDetail(env, id) {
   }
 
   const inline_keyboard = [
-    [{ text: "🔄 重新拉取工具列表", callback_data: `mcp_refresh:${id}` }],
+    [
+      { text: "✏️ 名称", callback_data: `mcp_edit:${id}:name` },
+      { text: "✏️ 类型", callback_data: `mcp_edit:${id}:type` },
+      { text: "✏️ 地址", callback_data: `mcp_edit:${id}:url` },
+    ],
+    [
+      { text: "✏️ 描述", callback_data: `mcp_edit:${id}:description` },
+      { text: "✏️ 关键词", callback_data: `mcp_edit:${id}:keywords` },
+      { text: "✏️ 请求头", callback_data: `mcp_edit:${id}:headers` },
+    ],
     [{ text: "🗑️ 删除此 MCP 服务", callback_data: `mcp_delete:${id}` }],
+    [{ text: "🔄 重新拉取工具列表", callback_data: `mcp_refresh:${id}` }],
   ];
 
   service.tools.forEach((tool, index) => {
