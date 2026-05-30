@@ -284,6 +284,11 @@ async function handleCallback(query, env) {
       return;
     }
 
+    if (data.startsWith("mcp_service_toggle:")) {
+      await toggleMcpService(env, chatId, messageId, data.split(":")[1]);
+      return;
+    }
+
     if (data.startsWith("mcp_edit:")) {
       const [, id, field] = data.split(":");
       await startMcpEditField(env, userId, chatId, messageId, id, field);
@@ -449,6 +454,14 @@ async function continueMcpSession(env, userId, chatId, value, session) {
   if (session.step === "mcp_headers") {
     await finishMcpFromSession(env, userId, chatId, null, parseHeaderLines(value));
   }
+}
+
+async function toggleMcpService(env, chatId, messageId, id) {
+  const service = await getMcpService(env, id);
+  if (!service) return;
+  service.enabled = service.enabled === false;
+  await putMcpService(env, service);
+  await editMcpDetail(env, chatId, messageId, id);
 }
 
 async function startMcpEditField(env, userId, chatId, messageId, id, field) {
@@ -617,6 +630,7 @@ async function buildMcpDetail(env, id) {
   }
 
   const inline_keyboard = [
+    [{ text: service.enabled === false ? "⛔ 服务已停用，点击启用" : "✅ 服务已启用，点击停用", callback_data: `mcp_service_toggle:${id}` }],
     [
       { text: "✏️ 名称", callback_data: `mcp_edit:${id}:name` },
       { text: "✏️ 类型", callback_data: `mcp_edit:${id}:type` },
