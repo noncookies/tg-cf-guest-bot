@@ -1,0 +1,16 @@
+name = "tg-visitor-bot"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[vars]
+BOT_TOKEN = "REPLACE_WITH_YOUR_TELEGRAM_BOT_TOKEN"
+# 多个管理员用英文逗号分隔，例如 "123456789,987654321"
+ADMIN_IDS = "REPLACE_WITH_YOUR_TELEGRAM_USER_ID"
+# 最大并发模型请求数，0 或不配置表示不限制
+MAX_CONCURRENT_REQUESTS = "2"
+# 并发判断窗口秒数；Cloudflare KV 原生最小 60 秒，建议从 60 开始
+CONCURRENCY_WINDOW_SECONDS = "60"
