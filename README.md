@@ -9,8 +9,7 @@
 ```text
 .
 ├── index.js          # 唯一入口，全部逻辑在此文件
-├── wrangler.toml     # 命令行部署时使用，网页配置可忽略
-└── agent.md          # 原始需求文档
+└── wrangler.toml     # 命令行部署时使用，网页配置可忽略
 ```
 
 ## 2. 创建 Telegram Bot
