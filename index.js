@@ -1479,7 +1479,7 @@ async function mcpRpcRequest(service, method, params) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Accept": service.type === "SSE" ? "application/json, text/event-stream" : "application/json",
+      "Accept": "application/json, text/event-stream",
       "MCP-Protocol-Version": "2024-11-05",
       ...(service.headers || {}),
     },
