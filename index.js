@@ -8,6 +8,7 @@ const TELEGRAM_API = "https://api.telegram.org";
 const DEFAULT_STATUS = "running";
 const BOT_CLOSED_MESSAGE = "当前bot已经关闭。\n​没魔力了，本大人要下线睡觉！不准再戳了，哼！💤";
 const PRIVATE_CHAT_DISABLED_MESSAGE = "普通用户不支持私聊。\n​笨蛋人类！普通身份才没有资格和小魅魔说悄悄话呢！";
+const INFO_COMMAND = "！获取";
 const THINKING_MESSAGE = "哼，魔力加载中……不准催，再催吸干你哦！(＞﹏＜)";
 const CONCURRENCY_BUSY_MESSAGE = "魔力通道挤满了，稍后再来戳我！";
 const CONCURRENCY_KEY = "runtime:active_requests";
@@ -791,6 +792,8 @@ async function handleAiChat(message, env) {
 
   if (!(await shouldRespondToMessage(message, env))) return;
 
+  if (await tryHandleInfoCommand(message, env, null)) return;
+
   const activeModel = await getActiveModel(env);
   if (!activeModel) {
     await sendMessage(env, chatId, "尚未配置可用模型，请管理员使用 /pz 添加模型。", message.message_id);
@@ -855,6 +858,8 @@ async function handleGuestMessage(message, env) {
     return;
   }
 
+  if (await tryHandleInfoCommand(message, env, guestQueryId)) return;
+
   const activeModel = await getActiveModel(env);
   if (!activeModel) {
     await answerGuestText(env, guestQueryId, "尚未配置可用模型，请管理员私聊 bot 使用 /pz 添加模型。");
@@ -892,6 +897,61 @@ async function handleGuestMessage(message, env) {
     console.error("guest ai failed", error);
     await answerGuestText(env, guestQueryId, `模型调用失败：${error.message}`);
   }
+}
+
+async function tryHandleInfoCommand(message, env, guestQueryId) {
+  const rawText = message.text || message.caption || "";
+  const cleanText = await cleanUserText(rawText, env);
+
+  if (cleanText.trim() !== INFO_COMMAND) return false;
+
+  const chat = message.guest_bot_caller_chat || message.chat;
+  const repliedMessage = message.reply_to_message;
+  const targetUser = repliedMessage
+    ? (repliedMessage.from || message.guest_bot_caller_user || message.from)
+    : (message.guest_bot_caller_user || message.from);
+
+  const text = buildInfoText(chat, targetUser, Boolean(repliedMessage));
+
+  if (guestQueryId) {
+    await answerGuestText(env, guestQueryId, text, "HTML");
+  } else {
+    await sendMessage(env, message.chat.id, text, message.message_id, undefined, "HTML");
+  }
+  return true;
+}
+
+function buildInfoText(chat, user, isReply) {
+  const chatTitle = chat?.title || chat?.first_name || "（未知）";
+  const lines = [
+    "📋 信息获取",
+    "",
+    "群组名称：" + monospace(chatTitle),
+    "群组 ID：" + monospace(chat?.id),
+    "",
+    isReply ? "被回复用户：" : "发送者：",
+    "昵称：" + monospace(formatFullName(user)),
+    "用户名：" + (user?.username ? monospace("@" + user.username) : "（未设置）"),
+    "用户 ID：" + monospace(user?.id),
+  ];
+  return lines.join("\n");
+}
+
+function formatFullName(user) {
+  if (!user) return "（未知）";
+  return [user.first_name, user.last_name].filter(Boolean).join(" ") || "（未知）";
+}
+
+function monospace(value) {
+  if (value === undefined || value === null || value === "") return "（未知）";
+  return `<code>${escapeHtml(String(value))}</code>`;
+}
+
+function escapeHtml(text) {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 async function shouldRespondToMessage(message, env) {
@@ -1356,13 +1416,14 @@ async function telegram(env, method, payload) {
   return data.result;
 }
 
-async function sendMessage(env, chatId, text, replyToMessageId, reply_markup) {
+async function sendMessage(env, chatId, text, replyToMessageId, reply_markup, parse_mode) {
   const chunks = splitTelegramText(text);
   let firstMessage = null;
   for (const [index, chunk] of chunks.entries()) {
     const sent = await telegram(env, "sendMessage", {
       chat_id: chatId,
       text: chunk,
+      parse_mode,
       reply_to_message_id: index === 0 ? replyToMessageId : undefined,
       reply_markup: index === chunks.length - 1 ? reply_markup : undefined,
       disable_web_page_preview: true,
@@ -1416,7 +1477,7 @@ async function answerCallbackQuery(env, callbackQueryId, text) {
   });
 }
 
-async function answerGuestText(env, guestQueryId, text) {
+async function answerGuestText(env, guestQueryId, text, parse_mode) {
   await telegram(env, "answerGuestQuery", {
     guest_query_id: guestQueryId,
     result: {
@@ -1425,6 +1486,7 @@ async function answerGuestText(env, guestQueryId, text) {
       title: "AI 回复",
       input_message_content: {
         message_text: limitTelegramText(text || "（无响应）"),
+        parse_mode,
       },
     },
   });
